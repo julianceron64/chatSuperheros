@@ -35,6 +35,18 @@ if (navigator.serviceWorker) {
             // para evitar la duplicación.
             if (payload.usuario === usuario) return;
 
+            // ── Reproducir sonido personalizado según el tipo de notificación ──
+            // Nota: solo funciona cuando la pestaña está abierta porque el SW no
+            // tiene acceso a AudioContext. Al llegar en segundo plano, el SO usa
+            // su sonido de sistema por defecto.
+            var tipoNoti = payload.tipo || 'mensaje';
+            switch (tipoNoti) {
+                case 'mencion':    NotifSounds.mencion();    break;
+                case 'alerta':     NotifSounds.alerta();     break;
+                case 'bienvenida': NotifSounds.bienvenida(); break;
+                default:           NotifSounds.mensaje();    break;
+            }
+
             if (!timeline.hasClass('oculto')) {
                 crearMensajeHTML(payload.cuerpo || payload.mensaje || '', payload.usuario);
             } else {
