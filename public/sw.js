@@ -227,6 +227,26 @@ self.addEventListener('push', e => {
         bienvenida: `${base}/sounds/bienvenida.mp3`
     };
 
+    // Patrones de vibración por tipo de notificación.
+    // Formato: [vibrar_ms, pausa_ms, vibrar_ms, pausa_ms, ...]
+    //
+    // Ejemplo 1 — mensaje: doble golpe corto y suave; discreta para chats.
+    //   ▮▮  ▮▮
+    //
+    // Ejemplo 2 — mencion: dos pulsos breves + uno largo; más llamativa.
+    //   ▮▮  ▮▮  ▮▮▮▮▮▮
+    //
+    // Ejemplo 3 — alerta: tres golpes largos con pausa corta; sensación de urgencia.
+    //   ▮▮▮▮▮▮  ▮▮▮▮▮▮  ▮▮▮▮▮▮
+    //
+    // Ejemplo 4 — bienvenida: sin vibración (notificación silenciosa).
+    const patronesPorTipo = {
+        mensaje:    [100, 60, 100],
+        mencion:    [100, 60, 100, 60, 300],
+        alerta:     [300, 100, 300, 100, 300],
+        bienvenida: []
+    };
+
     const options = {
         body: data.cuerpo,
         icon: `${base}/img/avatars/${usuarioValido}.jpg`,
@@ -239,7 +259,7 @@ self.addEventListener('push', e => {
         timestamp: Date.now(),
         dir: 'ltr',
         lang: 'es',
-        vibrate: esBienvenida ? [] : [125, 75, 125, 275, 200, 275, 125, 75, 125],
+        vibrate: patronesPorTipo[tipo] ?? patronesPorTipo.mensaje,
         data: {
             url: '/',
             usuario: usuarioValido,
