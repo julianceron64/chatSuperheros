@@ -62,12 +62,21 @@ var NotifSounds = (function () {
         return reproducir('bienvenida.mp3', 0.6);
     }
 
+    // ── Ejemplo 5: Urgente ───────────────────────────────────────────────────
+    // Archivo: public/sounds/urgente.mp3
+    // Sonido de máxima atención; volumen al 100%. Acompaña notificaciones que
+    // requieren interacción obligatoria (requireInteraction: true).
+    function urgente() {
+        return reproducir('urgente.mp3', 1.0);
+    }
+
     // ── API pública ──────────────────────────────────────────────────────────
     return {
         mensaje:    mensaje,
         mencion:    mencion,
         alerta:     alerta,
-        bienvenida: bienvenida
+        bienvenida: bienvenida,
+        urgente:    urgente
     };
 
 }());

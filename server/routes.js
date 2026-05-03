@@ -91,18 +91,22 @@ router.post('/validar-suscripcion', (req, res) => {
   res.json({ valida });
 });
 
-// Envar una notificación PUSH a las personas
-// que nosotros queramos
-// ES ALGO que se controla del lado del server
+// Enviar una notificación PUSH a las personas que nosotros queramos.
+// Tipos admitidos: 'mensaje' | 'mencion' | 'alerta' | 'bienvenida' | 'urgente'
+// El tipo 'urgente' y los flags requiereInteraccion:true fuerzan que la
+// notificación no se auto-descarte hasta que el usuario interactúe.
 router.post('/push', (req, res) => {
 
-  const post = {
-    titulo: req.body.titulo,
-    cuerpo: req.body.cuerpo,
-    usuario: req.body.usuario,
-    tipo: req.body.tipo || 'mensaje'   // admite: 'mensaje', 'mencion', 'alerta', 'bienvenida'
-  };
+  const tiposValidos = ['mensaje', 'mencion', 'alerta', 'bienvenida', 'urgente'];
+  const tipo = tiposValidos.includes(req.body.tipo) ? req.body.tipo : 'mensaje';
 
+  const post = {
+    titulo:              req.body.titulo,
+    cuerpo:              req.body.cuerpo,
+    usuario:             req.body.usuario,
+    tipo:                tipo,
+    requiereInteraccion: req.body.requiereInteraccion === true || tipo === 'urgente'
+  };
 
   push.sendPush( post );
 

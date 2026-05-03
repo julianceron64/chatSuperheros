@@ -177,6 +177,14 @@ function construirAcciones(tipo, usuario) {
                 { action: 'descartar',    title: 'OK',           icon: iconCerrar  }
             ];
 
+        // Ejemplo 5: urgente — exige acción explícita; sin botón de descarte
+        // El usuario DEBE confirmar o ver detalles; no puede ignorarla pasivamente.
+        case 'urgente':
+            return [
+                { action: 'confirmar',    title: '✔ Confirmar',  icon: iconApp     },
+                { action: 'ver-detalles', title: 'Ver detalles', icon: iconDetalles }
+            ];
+
         // Ejemplo 4: mensaje nuevo (tipo por defecto) — ver o responder
         case 'mensaje':
         default:
@@ -212,9 +220,6 @@ self.addEventListener('push', e => {
     const usuarioValido = avatares.includes(data.usuario) ? data.usuario : 'spiderman';
     const tipo = data.tipo || 'mensaje';
 
-    // Las notificaciones de bienvenida no exigen interacción y no vibran
-    const esBienvenida = tipo === 'bienvenida';
-
     const base = self.location.origin;
 
     // Mapa de sonidos por tipo: archivo MP3 en public/sounds/
@@ -224,7 +229,8 @@ self.addEventListener('push', e => {
         mensaje:    `${base}/sounds/mensaje.mp3`,
         mencion:    `${base}/sounds/mencion.mp3`,
         alerta:     `${base}/sounds/alerta.mp3`,
-        bienvenida: `${base}/sounds/bienvenida.mp3`
+        bienvenida: `${base}/sounds/bienvenida.mp3`,
+        urgente:    `${base}/sounds/urgente.mp3`
     };
 
     // Patrones de vibración por tipo de notificación.
@@ -240,12 +246,24 @@ self.addEventListener('push', e => {
     //   ▮▮▮▮▮▮  ▮▮▮▮▮▮  ▮▮▮▮▮▮
     //
     // Ejemplo 4 — bienvenida: sin vibración (notificación silenciosa).
+    //
+    // Ejemplo 5 — urgente: ráfaga larga + pausa + ráfagas cortas repetidas; emergencia.
+    //   ▮▮▮▮▮▮▮▮▮▮  ▮▮▮  ▮▮▮  ▮▮▮  ▮▮▮
     const patronesPorTipo = {
         mensaje:    [100, 60, 100],
         mencion:    [100, 60, 100, 60, 300],
         alerta:     [300, 100, 300, 100, 300],
-        bienvenida: []
+        bienvenida: [],
+        urgente:    [500, 100, 150, 80, 150, 80, 150, 80, 150]
     };
+
+    // requireInteraction: true obliga al usuario a interactuar explícitamente para
+    // cerrar la notificación (no se auto-descarta en escritorio).
+    // Los tipos urgente/alerta/mencion siempre lo exigen.
+    // Cualquier payload puede forzarlo con la propiedad `requiereInteraccion: true`.
+    const tiposInteraccionObligatoria = ['urgente', 'alerta', 'mencion'];
+    const requireInteraction = data.requiereInteraccion === true ||
+                               tiposInteraccionObligatoria.includes(tipo);
 
     const options = {
         body: data.cuerpo,
@@ -253,8 +271,8 @@ self.addEventListener('push', e => {
         badge: `${base}/img/favicon.ico`,
         tag: `${tipo}-${usuarioValido}`,
         renotify: true,
-        requireInteraction: !esBienvenida,
-        silent: esBienvenida,
+        requireInteraction: requireInteraction,
+        silent: tipo === 'bienvenida',
         sound: sonidosPorTipo[tipo] || sonidosPorTipo.mensaje,
         timestamp: Date.now(),
         dir: 'ltr',
@@ -298,42 +316,90 @@ self.addEventListener('notificationclose', e => {
 
 self.addEventListener('notificationclick', e => {
     const notificacion = e.notification;
-    const accion = e.action;
-    const data = notificacion.data || {};
+    const accion       = e.action;
+    const data         = notificacion.data || {};
 
     notificacion.close();
 
     // Acciones silenciosas: solo cierran la notificación, sin abrir la app
-    if (accion === 'descartar' || accion === 'ignorar') {
-        return;
+    if (accion === 'descartar' || accion === 'ignorar') return;
+
+    const base    = self.location.origin;
+    const usuario = data.usuario || '';
+    const tipo    = data.tipo    || 'mensaje';
+
+    // ── Resolver URL destino ─────────────────────────────────────────────────
+    // Cada acción (o clic directo) tiene una URL específica con parámetros que
+    // la app lee al abrirse para navegar a la pantalla correcta.
+    //
+    //   ?conversacion=X          → abre el chat con el héroe X
+    //   ?conversacion=X&accion=responder → abre chat + modal de redacción
+    //   ?conversacion=X&origen=mencion   → abre chat resaltando la mención
+    //   ?vista=alerta            → lleva a la pantalla de alertas / selección
+    function resolverUrl() {
+        switch (accion) {
+            case 'ver-mensaje':
+                return `${base}/?conversacion=${usuario}`;
+            case 'ver-mencion':
+                return `${base}/?conversacion=${usuario}&origen=mencion`;
+            case 'responder':
+                return `${base}/?conversacion=${usuario}&accion=responder`;
+            case 'unirse':
+            case 'ver-detalles':
+                return `${base}/?vista=alerta`;
+            case 'ver-app':
+                return `${base}/`;
+            // Urgente: confirmar lleva a la app; sin dismiss disponible
+            case 'confirmar':
+                return `${base}/?accion=confirmar&tipo=urgente`;
+            default:
+                // Clic directo sobre la notificación (sin botón de acción)
+                if (tipo === 'urgente') return `${base}/?accion=confirmar&tipo=urgente`;
+                if (tipo === 'alerta')  return `${base}/?vista=alerta`;
+                if (usuario)           return `${base}/?conversacion=${usuario}`;
+                return `${base}/`;
+        }
     }
+
+    const urlDestino = resolverUrl();
 
     const respuesta = clients.matchAll({
         type: 'window',
         includeUncontrolled: true
     }).then(clientes => {
 
+        // ── Caso A: ya hay una pestaña de la app abierta ────────────────────
         const clienteExistente = clientes.find(c => {
-            try { return new URL(c.url).origin === self.location.origin; }
+            try { return new URL(c.url).origin === base; }
             catch (_) { return false; }
         });
 
         if (clienteExistente) {
-            // Informar a la pestaña abierta qué acción se pulsó
-            // para que reaccione en consecuencia (ver chat, abrir modal, etc.)
-            clienteExistente.postMessage({
-                tipo: 'notificacion-click',
-                accion: accion,
-                payload: data
-            });
+            // Enviar la acción a la app para que reaccione en la UI
+            try {
+                clienteExistente.postMessage({
+                    tipo:       'notificacion-click',
+                    accion:     accion || 'abrir',
+                    urlDestino: urlDestino,
+                    payload:    data
+                });
+            } catch (_) { /* cliente ya cerrado */ }
+
+            // Si la pestaña está en una URL diferente, navegar a la correcta
+            const urlActual = new URL(clienteExistente.url);
+            const urlNueva  = new URL(urlDestino);
+            const mismaRuta = urlActual.pathname === urlNueva.pathname &&
+                              urlActual.search   === urlNueva.search;
+
+            if (!mismaRuta && 'navigate' in clienteExistente) {
+                return clienteExistente.navigate(urlDestino)
+                    .then(c => (c || clienteExistente).focus());
+            }
+
             return clienteExistente.focus();
         }
 
-        // Sin ventana abierta → lanzar la app y pasarle la acción por URL
-        const urlDestino = (accion === 'responder')
-            ? `/?accion=responder&usuario=${data.usuario}`
-            : '/';
-
+        // ── Caso B: sin ventana abierta → lanzar la app en la URL correcta ──
         return clients.openWindow(urlDestino);
     });
 

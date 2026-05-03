@@ -44,11 +44,21 @@ if (navigator.serviceWorker) {
                 case 'mencion':    NotifSounds.mencion();    break;
                 case 'alerta':     NotifSounds.alerta();     break;
                 case 'bienvenida': NotifSounds.bienvenida(); break;
+                case 'urgente':    NotifSounds.urgente();    break;
                 default:           NotifSounds.mensaje();    break;
             }
 
             if (!timeline.hasClass('oculto')) {
-                crearMensajeHTML(payload.cuerpo || payload.mensaje || '', payload.usuario);
+                if (tipoNoti === 'urgente') {
+                    $.mdtoast('ALERTA URGENTE: ' + (payload.cuerpo || payload.mensaje || ''), {
+                        interaction: true,
+                        interactionTimeout: 6000,
+                        actionText: 'OK',
+                        type: 'warning'
+                    });
+                } else {
+                    crearMensajeHTML(payload.cuerpo || payload.mensaje || '', payload.usuario);
+                }
             } else {
                 $.mdtoast('Nuevo mensaje de @' + payload.usuario, {
                     interaction: true,
@@ -64,36 +74,54 @@ if (navigator.serviceWorker) {
 
             switch (accion) {
 
-                // ── Mensaje / Mención / Alerta: mostrar chat o selección de héroe ──
+                // ── Ver mensaje / mención: ir directo a esa conversación ──────
                 case 'ver-mensaje':
                 case 'ver-mencion':
-                case 'ver-detalles':
-                case 'unirse':
-                case 'ver-app':
-                    if (usuarioAuth && !timeline.hasClass('oculto')) {
-                        // Ya está en el chat — mostrar toast con el remitente
-                        if (payload.usuario) {
-                            $.mdtoast('Mensaje de @' + payload.usuario, {
-                                interaction: true,
-                                interactionTimeout: 4000,
-                                actionText: 'OK'
-                            });
-                        }
-                    } else if (usuarioAuth) {
-                        mostrarSeleccionHero();
+                    if (!usuarioAuth) { mostrarLogin(); break; }
+                    if (payload.usuario) {
+                        irAConversacion(payload.usuario);
                     } else {
-                        mostrarLogin();
+                        mostrarSeleccionHero();
                     }
                     break;
 
-                // ── Responder: abrir el modal de redacción si hay héroe seleccionado ──
-                case 'responder':
-                    if (usuarioAuth && usuario && !timeline.hasClass('oculto')) {
-                        nuevoBtn.click();
-                    } else if (usuarioAuth) {
-                        mostrarSeleccionHero();
+                // ── Urgente confirmado: toast de acuse de recibo ──────────────
+                case 'confirmar':
+                    if (!usuarioAuth) { mostrarLogin(); break; }
+                    $.mdtoast('✔ Notificación urgente confirmada', {
+                        interaction: true,
+                        interactionTimeout: 5000,
+                        actionText: 'OK'
+                    });
+                    break;
+
+                // ── Alerta / unirse / abrir app: pantalla de selección ────────
+                case 'ver-detalles':
+                case 'unirse':
+                case 'ver-app':
+                case 'abrir':
+                    if (!usuarioAuth) { mostrarLogin(); break; }
+                    if (!timeline.hasClass('oculto') && payload.usuario) {
+                        $.mdtoast('Notificación de @' + payload.usuario, {
+                            interaction: true,
+                            interactionTimeout: 4000,
+                            actionText: 'OK'
+                        });
                     } else {
-                        mostrarLogin();
+                        mostrarSeleccionHero();
+                    }
+                    break;
+
+                // ── Responder: ir a la conversación y abrir el modal ──────────
+                case 'responder':
+                    if (!usuarioAuth) { mostrarLogin(); break; }
+                    if (payload.usuario) {
+                        irAConversacion(payload.usuario);
+                        setTimeout(function () { nuevoBtn.click(); }, 350);
+                    } else if (!timeline.hasClass('oculto')) {
+                        nuevoBtn.click();
+                    } else {
+                        mostrarSeleccionHero();
                     }
                     break;
             }
@@ -179,6 +207,7 @@ AuthDB.initDB()
         if (sesion) {
             usuarioAuth = sesion;
             mostrarSeleccionHero();
+            manejarParametrosUrl();   // navegar si la app fue abierta desde notificación
         } else {
             mostrarLogin();
         }
@@ -359,6 +388,47 @@ function logIn(ingreso) {
         titulo.html('<i class="fa fa-user"></i> Seleccione Personaje');
     }
 
+}
+
+
+// Navega directamente a la conversación con el héroe indicado.
+// Equivale a hacer clic en su avatar desde la pantalla de selección.
+var AVATARES_VALIDOS = ['spiderman', 'ironman', 'wolverine', 'thor', 'hulk'];
+
+function irAConversacion(heroe) {
+    if (!AVATARES_VALIDOS.includes(heroe)) return;
+    usuario = heroe;
+    titulo.text('@' + heroe);
+    if (usuarioAuth) {
+        AuthDB.actualizarHero(usuarioAuth.username, heroe);
+        usuarioAuth.hero = heroe;
+    }
+    logIn(true);
+}
+
+
+// Lee los parámetros de URL que el SW inyecta al abrir la app desde una
+// notificación y navega a la pantalla correcta.
+//
+//   ?conversacion=X          → abre el chat con el héroe X
+//   ?conversacion=X&accion=responder → abre chat + modal de redacción
+//   ?conversacion=X&origen=mencion   → abre el chat (mención resaltada)
+//   ?vista=alerta            → muestra la pantalla de selección de héroe
+function manejarParametrosUrl() {
+    if (!usuarioAuth) return;
+    var params       = new URLSearchParams(window.location.search);
+    var conversacion = params.get('conversacion');
+    var vista        = params.get('vista');
+    var accion       = params.get('accion');
+
+    if (conversacion) {
+        irAConversacion(conversacion);
+        if (accion === 'responder') {
+            setTimeout(function () { nuevoBtn.click(); }, 350);
+        }
+    } else if (vista === 'alerta') {
+        mostrarSeleccionHero();
+    }
 }
 
 
