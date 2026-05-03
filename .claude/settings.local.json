@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"c:\\\\Users\\\\USUARIO\\\\Desktop\\\\uni\\\\Electiva 3 - PWA\\\\ChatConPush\\\\public\\\\sounds\")"
+    ]
+  }
+}

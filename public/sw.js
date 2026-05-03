@@ -217,6 +217,16 @@ self.addEventListener('push', e => {
 
     const base = self.location.origin;
 
+    // Mapa de sonidos por tipo: archivo MP3 en public/sounds/
+    // (La propiedad `sound` está en el spec pero soporte de navegadores es limitado;
+    //  cuando no se implementa el OS usa su sonido de sistema por defecto.)
+    const sonidosPorTipo = {
+        mensaje:    `${base}/sounds/mensaje.mp3`,
+        mencion:    `${base}/sounds/mencion.mp3`,
+        alerta:     `${base}/sounds/alerta.mp3`,
+        bienvenida: `${base}/sounds/bienvenida.mp3`
+    };
+
     const options = {
         body: data.cuerpo,
         icon: `${base}/img/avatars/${usuarioValido}.jpg`,
@@ -225,6 +235,7 @@ self.addEventListener('push', e => {
         renotify: true,
         requireInteraction: !esBienvenida,
         silent: esBienvenida,
+        sound: sonidosPorTipo[tipo] || sonidosPorTipo.mensaje,
         timestamp: Date.now(),
         dir: 'ltr',
         lang: 'es',

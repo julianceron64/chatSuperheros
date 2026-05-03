@@ -1,121 +1,65 @@
-// Sonidos de notificación generados con Web Audio API (sin archivos de audio).
+// Sonidos de notificación cargados desde archivos MP3.
 //
-// La Web Notifications API define la propiedad `sound` en el spec, pero ningún
-// navegador la implementa — los Service Workers tampoco tienen acceso a
-// AudioContext. Por eso los sonidos se reproducen desde la pestaña abierta
-// cuando el SW reenvía el push via postMessage.
+// Coloca los archivos en public/sounds/ (raíz web del proyecto):
+//   public/sounds/mensaje.mp3    — sonido para mensajes nuevos
+//   public/sounds/mencion.mp3    — sonido para menciones directas
+//   public/sounds/alerta.mp3     — sonido para alertas urgentes
+//   public/sounds/bienvenida.mp3 — sonido para notificaciones de bienvenida
 //
-// Cuando la app está cerrada el SO reproduce su sonido de sistema por defecto.
+// Uso:
+//   NotifSounds.mensaje()
+//   NotifSounds.mencion()
+//   NotifSounds.alerta()
+//   NotifSounds.bienvenida()
 //
-// Ejemplos disponibles:
-//   NotifSounds.mensaje()    — ding suave de dos tonos  (mensajes nuevos)
-//   NotifSounds.mencion()    — triple ping ascendente   (menciones directas)
-//   NotifSounds.alerta()     — pulsos de onda cuadrada  (alertas urgentes)
-//   NotifSounds.bienvenida() — arpegio Do-Mi-Sol-Do     (bienvenida)
+// Nota: los sonidos sólo se reproducen cuando la pestaña está abierta.
+// Cuando la app está cerrada el SW intenta usar la propiedad `sound` de la
+// notificación, pero el soporte de navegadores es limitado (Chrome/Firefox
+// no la implementan aún); en ese caso el SO usa su sonido de sistema.
 
 var NotifSounds = (function () {
     'use strict';
 
-    var AC = window.AudioContext || window.webkitAudioContext;
+    var BASE = '/sounds/';
 
-    // Si el navegador no soporta Web Audio API las funciones son no-ops silenciosas
-    if (!AC) {
-        var noop = function () {};
-        return { mensaje: noop, mencion: noop, alerta: noop, bienvenida: noop };
-    }
+    // ── Utilidad interna ─────────────────────────────────────────────────────
 
-    // ── Utilidades internas ──────────────────────────────────────────────────
-
-    // Programa una nota en el contexto de audio dado.
-    // tipo: 'sine' | 'square' | 'triangle' | 'sawtooth'
-    function nota(ctx, frecuencia, inicio, duracion, tipo, volumen) {
-        var osc  = ctx.createOscillator();
-        var gain = ctx.createGain();
-
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        osc.type = tipo;
-        osc.frequency.setValueAtTime(frecuencia, inicio);
-
-        // Envolvente: ataque instantáneo → decaimiento suave hasta silencio
-        gain.gain.setValueAtTime(volumen, inicio);
-        gain.gain.exponentialRampToValueAtTime(0.0001, inicio + duracion);
-
-        osc.start(inicio);
-        osc.stop(inicio + duracion + 0.02);   // pequeño margen para el fade
-    }
-
-    // Crea un AudioContext, lo resume si está suspendido y ejecuta fn(ctx).
-    // Cierra el contexto después de duracionTotal segundos para liberar recursos.
-    function reproducir(duracionTotal, fn) {
-        try {
-            var ctx = new AC();
-            var ejecutar = function () {
-                fn(ctx);
-                setTimeout(function () {
-                    try { ctx.close(); } catch (_) {}
-                }, (duracionTotal + 0.15) * 1000);
-            };
-            if (ctx.state === 'suspended') {
-                ctx.resume().then(ejecutar).catch(function () {});
-            } else {
-                ejecutar();
-            }
-        } catch (_) {}
+    // Crea un elemento Audio, ajusta volumen y reproduce.
+    // Devuelve la promesa de play() para poder encadenar .then/.catch si hace falta.
+    function reproducir(archivo, volumen) {
+        var audio = new Audio(BASE + archivo);
+        audio.volume = volumen !== undefined ? volumen : 0.7;
+        return audio.play().catch(function (err) {
+            console.warn('[Sounds] No se pudo reproducir "' + archivo + '":', err.message);
+        });
     }
 
     // ── Ejemplo 1: Mensaje nuevo ─────────────────────────────────────────────
-    // Ding suave de dos tonos (A5 → D6), estilo mensajería clásica.
-    // Onda sinusoidal, volumen moderado, duración ~0.4 s.
+    // Archivo: public/sounds/mensaje.mp3
+    // Sonido suave para notificaciones de chat genéricas.
     function mensaje() {
-        reproducir(0.45, function (ctx) {
-            var t = ctx.currentTime;
-            nota(ctx, 880,  t,        0.15, 'sine', 0.30);  // A5
-            nota(ctx, 1175, t + 0.16, 0.22, 'sine', 0.25);  // D6
-        });
+        return reproducir('mensaje.mp3', 0.7);
     }
 
     // ── Ejemplo 2: Mención directa ───────────────────────────────────────────
-    // Triple ping C6-C6-E6: dos toques iguales y uno más agudo al final.
-    // Más vivo que el de mensaje para llamar más la atención.
+    // Archivo: public/sounds/mencion.mp3
+    // Sonido más llamativo para cuando alguien te menciona directamente.
     function mencion() {
-        reproducir(0.55, function (ctx) {
-            var t = ctx.currentTime;
-            nota(ctx, 1047, t,        0.09, 'sine', 0.38);  // C6
-            nota(ctx, 1047, t + 0.13, 0.09, 'sine', 0.38);  // C6
-            nota(ctx, 1319, t + 0.26, 0.20, 'sine', 0.32);  // E6
-        });
+        return reproducir('mencion.mp3', 0.8);
     }
 
     // ── Ejemplo 3: Alerta urgente ────────────────────────────────────────────
-    // Cuatro pulsos alternados entre A4 y C#5 con onda cuadrada.
-    // El timbre áspero de la onda cuadrada transmite urgencia.
+    // Archivo: public/sounds/alerta.mp3
+    // Sonido con urgencia para alertas críticas; volumen más alto.
     function alerta() {
-        reproducir(0.75, function (ctx) {
-            var t = ctx.currentTime;
-            for (var i = 0; i < 4; i++) {
-                nota(ctx,
-                    i % 2 === 0 ? 440 : 554,   // A4 / C#5
-                    t + i * 0.17,
-                    0.13,
-                    'square',
-                    0.18
-                );
-            }
-        });
+        return reproducir('alerta.mp3', 1.0);
     }
 
     // ── Ejemplo 4: Bienvenida ────────────────────────────────────────────────
-    // Arpegio ascendente Do-Mi-Sol-Do (C5-E5-G5-C6), onda sinusoidal suave.
-    // Las notas se superponen ligeramente para un efecto de "chime" acogedor.
+    // Archivo: public/sounds/bienvenida.mp3
+    // Sonido cálido y agradable para el primer contacto del usuario.
     function bienvenida() {
-        reproducir(0.75, function (ctx) {
-            var t = ctx.currentTime;
-            [523, 659, 784, 1047].forEach(function (freq, i) {
-                nota(ctx, freq, t + i * 0.13, 0.30, 'sine', 0.22);
-            });
-        });
+        return reproducir('bienvenida.mp3', 0.6);
     }
 
     // ── API pública ──────────────────────────────────────────────────────────
