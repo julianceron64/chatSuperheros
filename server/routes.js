@@ -1,102 +1,98 @@
-// Routes.js - Módulo de rutas
 const express = require('express');
-const router = express.Router();
-const push = require('./push');
+const router  = express.Router();
+const push    = require('./push');
 
 const mensajes = [
-
-  {
-    _id: 'XXX',
-    user: 'spiderman',
-    mensaje: 'Hola Mundo'
-  }
-
+  { _id: 'XXX', user: 'spiderman', mensaje: 'Hola Mundo' }
 ];
 
 
-// Get mensajes
-router.get('/', function (req, res) {
-  // res.json('Obteniendo mensajes');
-  res.json( mensajes );
+// ── Mensajes ─────────────────────────────────────────────────────────────────
+
+router.get('/', (req, res) => {
+  res.json(mensajes);
 });
 
-
-// Post mensaje
-router.post('/', function (req, res) {
-  
+router.post('/', (req, res) => {
   const mensaje = {
     mensaje: req.body.mensaje,
-    user: req.body.user
+    user:    req.body.user
   };
-
-  mensajes.push( mensaje );
-
+  mensajes.push(mensaje);
   console.log(mensajes);
 
-  // Enviar notificación push a todos los suscritos (tipo 'mensaje')
-  const notificacion = {
-    titulo: `Nuevo mensaje de @${mensaje.user}`,
-    cuerpo: mensaje.mensaje,
+  push.sendPush({
+    titulo:  `Nuevo mensaje de @${mensaje.user}`,
+    cuerpo:  mensaje.mensaje,
     usuario: mensaje.user,
-    tipo: 'mensaje'
-  };
-
-  push.sendPush( notificacion );
-
-  res.json({
-    ok: true,
-    mensaje
+    tipo:    'mensaje'
   });
+
+  res.json({ ok: true, mensaje });
 });
 
 
-// Almacenar la suscripción y enviar notificación de bienvenida
+// ── Suscripciones ─────────────────────────────────────────────────────────────
+
+// Registrar suscripción y enviar notificación de bienvenida.
+// Body esperado: { suscripcion: <PushSubscription>, usuario: string, dispositivo: string }
+// También acepta el formato legado (PushSubscription directo) por compatibilidad.
 router.post('/subscribe', (req, res) => {
+  const body = req.body;
 
-  const suscripcion = req.body;
+  // Detectar formato: enriquecido o legado
+  const entrada = body.suscripcion
+    ? { suscripcion: body.suscripcion, usuario: body.usuario || 'anonimo', dispositivo: body.dispositivo || 'desconocido' }
+    : { suscripcion: body,             usuario: 'anonimo',                 dispositivo: 'legado' };
 
-  push.addSubscription( suscripcion );
+  push.addSubscription(entrada);
 
-  // Notificación de bienvenida (tipo 'bienvenida') — solo para este suscriptor
-  push.sendPushToOne( suscripcion, {
-    titulo: '¡Notificaciones activadas!',
-    cuerpo: 'Recibirás alertas de nuevos mensajes aunque la app esté cerrada.',
+  // Bienvenida solo para este suscriptor
+  push.sendPushToOne(entrada, {
+    titulo:  '¡Notificaciones activadas!',
+    cuerpo:  `Hola ${entrada.usuario}. Recibirás alertas aunque la app esté cerrada.`,
     usuario: 'spiderman',
-    tipo: 'bienvenida'
+    tipo:    'bienvenida'
   });
 
-  res.json('subscribe');
-
+  res.json({ ok: true, usuario: entrada.usuario, dispositivo: entrada.dispositivo });
 });
 
-// Almacenar la suscripción
 router.get('/key', (req, res) => {
-
-  const key = push.getKey();
-
-
-  res.send(key);
-
+  res.send(push.getKey());
 });
-
 
 // Verificar si un endpoint sigue registrado en el servidor
 router.post('/validar-suscripcion', (req, res) => {
   const { endpoint } = req.body;
-  if (!endpoint) {
-    return res.json({ valida: false });
-  }
+  if (!endpoint) return res.json({ valida: false });
+
   const suscripciones = push.getSuscripciones();
-  const valida = suscripciones.some(s => s.endpoint === endpoint);
+  // Soporta formato enriquecido y legado
+  const valida = suscripciones.some(s => {
+    const raw = s.suscripcion || s;
+    return raw.endpoint === endpoint;
+  });
   res.json({ valida });
 });
 
-// Enviar una notificación PUSH a las personas que nosotros queramos.
-// Tipos admitidos: 'mensaje' | 'mencion' | 'alerta' | 'bienvenida' | 'urgente'
-// El tipo 'urgente' y los flags requiereInteraccion:true fuerzan que la
-// notificación no se auto-descarte hasta que el usuario interactúe.
-router.post('/push', (req, res) => {
 
+// ── Envío de notificaciones push ──────────────────────────────────────────────
+
+// Enviar push con destino configurable.
+// Tipos admitidos: 'mensaje' | 'mencion' | 'alerta' | 'bienvenida' | 'urgente'
+//
+// Destino (opcional, por orden de prioridad):
+//   dispositivo  → solo ese dispositivo (deviceId)
+//   usuario      → todos los dispositivos de ese usuario
+//   (ninguno)    → broadcast a todos los suscritos
+//
+// Ejemplo usuario específico:
+//   POST /api/push  { "titulo":"...", "cuerpo":"...", "usuario":"ironman", "destinatario":"johndoe" }
+//
+// Ejemplo dispositivo específico:
+//   POST /api/push  { "titulo":"...", "cuerpo":"...", "dispositivo":"dev_abc123" }
+router.post('/push', (req, res) => {
   const tiposValidos = ['mensaje', 'mencion', 'alerta', 'bienvenida', 'urgente'];
   const tipo = tiposValidos.includes(req.body.tipo) ? req.body.tipo : 'mensaje';
 
@@ -108,14 +104,38 @@ router.post('/push', (req, res) => {
     requiereInteraccion: req.body.requiereInteraccion === true || tipo === 'urgente'
   };
 
-  push.sendPush( post );
+  const destinatario = req.body.destinatario;   // username destino
+  const dispositivo  = req.body.dispositivo;    // deviceId destino
 
-  res.json( post );
+  if (dispositivo) {
+    push.sendPushToDevice(dispositivo, post);
+  } else if (destinatario) {
+    push.sendPushToUser(destinatario, post);
+  } else {
+    push.sendPush(post);
+  }
 
+  res.json({ ok: true, destino: dispositivo || destinatario || 'todos', post });
 });
 
 
+// Atajo semántico: enviar push a un usuario específico por nombre de ruta.
+// POST /api/push/usuario/johndoe
+router.post('/push/usuario/:username', (req, res) => {
+  const tiposValidos = ['mensaje', 'mencion', 'alerta', 'bienvenida', 'urgente'];
+  const tipo = tiposValidos.includes(req.body.tipo) ? req.body.tipo : 'mensaje';
 
+  const post = {
+    titulo:              req.body.titulo  || 'Notificación',
+    cuerpo:              req.body.cuerpo  || '',
+    usuario:             req.body.usuario || req.params.username,
+    tipo:                tipo,
+    requiereInteraccion: req.body.requiereInteraccion === true || tipo === 'urgente'
+  };
+
+  push.sendPushToUser(req.params.username, post);
+  res.json({ ok: true, destino: req.params.username, post });
+});
 
 
 module.exports = router;

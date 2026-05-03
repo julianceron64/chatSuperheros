@@ -163,7 +163,28 @@ var logoutBtn = $('#logout-btn');
 var usuario;
 var usuarioAuth = null;
 
-var NOTIF_PREF_KEY = 'notificacionesDeseadas';
+var NOTIF_PREF_KEY  = 'notificacionesDeseadas';
+var DEVICE_ID_KEY   = 'chatpwa_deviceId';
+
+// Genera (o recupera) un ID estable para este dispositivo/navegador.
+function obtenerDeviceId() {
+    var id = localStorage.getItem(DEVICE_ID_KEY);
+    if (!id) {
+        id = 'dev_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now().toString(36);
+        localStorage.setItem(DEVICE_ID_KEY, id);
+    }
+    return id;
+}
+
+// Envuelve una PushSubscription con los metadatos de usuario y dispositivo.
+// El servidor almacena este objeto para poder enviar push a usuarios específicos.
+function construirPayloadSuscripcion(rawSub) {
+    return {
+        suscripcion: rawSub.toJSON ? rawSub.toJSON() : rawSub,
+        usuario:     usuarioAuth ? usuarioAuth.username : 'anonimo',
+        dispositivo: obtenerDeviceId()
+    };
+}
 
 
 // ===== Navegación entre pantallas de auth =====
@@ -617,7 +638,7 @@ async function renovarSuscripcion() {
         await fetch('api/subscribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(nuevaSuscripcion)
+            body: JSON.stringify(construirPayloadSuscripcion(nuevaSuscripcion))
         });
 
         localStorage.setItem(NOTIF_PREF_KEY, 'true');
@@ -793,7 +814,7 @@ btnDesactivadas.on('click', async function () {
         await fetch('api/subscribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(subscription)
+            body: JSON.stringify(construirPayloadSuscripcion(subscription))
         });
 
         localStorage.setItem(NOTIF_PREF_KEY, 'true');
